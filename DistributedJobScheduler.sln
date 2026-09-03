@@ -1,0 +1,32 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.Api", "src\DistributedJobScheduler.Api\DistributedJobScheduler.Api.csproj", "{10000000-0000-0000-0000-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.Application", "src\DistributedJobScheduler.Application\DistributedJobScheduler.Application.csproj", "{10000000-0000-0000-0000-000000000002}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.Domain", "src\DistributedJobScheduler.Domain\DistributedJobScheduler.Domain.csproj", "{10000000-0000-0000-0000-000000000003}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.Infrastructure", "src\DistributedJobScheduler.Infrastructure\DistributedJobScheduler.Infrastructure.csproj", "{10000000-0000-0000-0000-000000000004}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.Scheduler", "src\DistributedJobScheduler.Scheduler\DistributedJobScheduler.Scheduler.csproj", "{10000000-0000-0000-0000-000000000005}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.Worker", "src\DistributedJobScheduler.Worker\DistributedJobScheduler.Worker.csproj", "{10000000-0000-0000-0000-000000000006}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.Contracts", "src\DistributedJobScheduler.Contracts\DistributedJobScheduler.Contracts.csproj", "{10000000-0000-0000-0000-000000000007}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.UnitTests", "tests\DistributedJobScheduler.UnitTests\DistributedJobScheduler.UnitTests.csproj", "{10000000-0000-0000-0000-000000000008}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.IntegrationTests", "tests\DistributedJobScheduler.IntegrationTests\DistributedJobScheduler.IntegrationTests.csproj", "{10000000-0000-0000-0000-000000000009}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DistributedJobScheduler.ArchitectureTests", "tests\DistributedJobScheduler.ArchitectureTests\DistributedJobScheduler.ArchitectureTests.csproj", "{10000000-0000-0000-0000-000000000010}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+EndGlobalSection
+EndGlobal
