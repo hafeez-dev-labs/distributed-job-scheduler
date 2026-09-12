@@ -5,7 +5,10 @@ namespace DistributedJobScheduler.Application;
 public interface IJobRepository
 {
     Task<JobDefinition?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<JobDefinition> CreateAsync(JobDefinition job, string idempotencyKey, CancellationToken cancellationToken = default);
     Task SaveAsync(JobDefinition job, CancellationToken cancellationToken = default);
+    Task<JobExecution?> GetExecutionAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<JobExecution> CreateExecutionAsync(JobExecution execution, string idempotencyKey, CancellationToken cancellationToken = default);
 }
 
 public interface IJobScheduler

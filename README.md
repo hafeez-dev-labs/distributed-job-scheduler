@@ -41,6 +41,7 @@ Observability and Dashboard span the platform.
 
 ```http
 POST /jobs
+Idempotency-Key: generate-monthly-report
 Content-Type: application/json
 
 {
@@ -49,6 +50,8 @@ Content-Type: application/json
   "retries": 5
 }
 ```
+
+Phase 1 provides job creation, retrieval, lifecycle operations, immediate trigger requests, cron validation, idempotency, and SQLite persistence. See `docs/phase-1.md` for the API contract and boundaries.
 
 ## Initial Project Structure
 
