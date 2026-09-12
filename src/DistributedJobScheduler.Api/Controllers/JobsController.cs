@@ -7,32 +7,84 @@ namespace DistributedJobScheduler.Api.Controllers;
 
 [ApiController]
 [Route("jobs")]
-public sealed class JobsController(IJobRepository repository) : ControllerBase
+public sealed class JobsController(IJobManagementService service) : ControllerBase
 {
     [HttpPost]
     public async Task<ActionResult<JobResponse>> Create(CreateJobRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
-            return BadRequest("Job name is required.");
-
-        var job = new JobDefinition(
-            Guid.NewGuid(),
-            request.Name,
-            request.Schedule,
-            JobPriority.Normal,
-            new RetryPolicy(request.Retries),
-            JobStatus.Active);
-
-        await repository.SaveAsync(job, cancellationToken);
-        return Created($"/jobs/{job.Id}", new JobResponse(job.Id, job.Name, job.CronExpression, job.Status.ToString()));
+        try
+        {
+            var job = await service.CreateAsync(request, GetIdempotencyKey(), cancellationToken);
+            return Created($"/jobs/{job.Id}", ToResponse(job));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(exception.Message);
+        }
     }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<JobResponse>> Get(Guid id, CancellationToken cancellationToken)
     {
-        var job = await repository.GetAsync(id, cancellationToken);
-        return job is null
-            ? NotFound()
-            : Ok(new JobResponse(job.Id, job.Name, job.CronExpression, job.Status.ToString()));
+        var job = await service.GetAsync(id, cancellationToken);
+        return job is null ? NotFound() : Ok(ToResponse(job));
     }
+
+    [HttpPost("{id:guid}/pause")]
+    public Task<ActionResult<JobResponse>> Pause(Guid id, CancellationToken cancellationToken) =>
+        ChangeState(() => service.PauseAsync(id, cancellationToken));
+
+    [HttpPost("{id:guid}/resume")]
+    public Task<ActionResult<JobResponse>> Resume(Guid id, CancellationToken cancellationToken) =>
+        ChangeState(() => service.ResumeAsync(id, cancellationToken));
+
+    [HttpPost("{id:guid}/cancel")]
+    public Task<ActionResult<JobResponse>> Cancel(Guid id, CancellationToken cancellationToken) =>
+        ChangeState(() => service.CancelAsync(id, cancellationToken));
+
+    [HttpPost("{id:guid}/trigger")]
+    public async Task<ActionResult<ExecutionResponse>> Trigger(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var execution = await service.TriggerNowAsync(id, GetIdempotencyKey(), cancellationToken);
+            return execution is null ? NotFound() : Accepted($"/jobs/{id}/executions/{execution.Id}", ToResponse(execution));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(exception.Message);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(exception.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/executions/{executionId:guid}")]
+    public async Task<ActionResult<ExecutionResponse>> GetExecution(Guid id, Guid executionId, CancellationToken cancellationToken)
+    {
+        var execution = await service.GetExecutionAsync(executionId, cancellationToken);
+        return execution is null || execution.JobId != id ? NotFound() : Ok(ToResponse(execution));
+    }
+
+    private async Task<ActionResult<JobResponse>> ChangeState(Func<Task<JobDefinition?>> operation)
+    {
+        try
+        {
+            var job = await operation();
+            return job is null ? NotFound() : Ok(ToResponse(job));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(exception.Message);
+        }
+    }
+
+    private string GetIdempotencyKey() => Request.Headers["Idempotency-Key"].ToString();
+
+    private static JobResponse ToResponse(JobDefinition job) =>
+        new(job.Id, job.Name, job.CronExpression, job.Status.ToString());
+
+    private static ExecutionResponse ToResponse(JobExecution execution) =>
+        new(execution.Id, execution.JobId, execution.Status.ToString(), execution.Attempt, execution.StartedAt, execution.CompletedAt, execution.FailureReason);
 }

@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
-  <ItemGroup><ProjectReference Include="..\DistributedJobScheduler.Application\DistributedJobScheduler.Application.csproj" /><ProjectReference Include="..\DistributedJobScheduler.Domain\DistributedJobScheduler.Domain.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DistributedJobScheduler.Application\DistributedJobScheduler.Application.csproj" />
+    <ProjectReference Include="..\DistributedJobScheduler.Domain\DistributedJobScheduler.Domain.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+  </ItemGroup>
 </Project>
