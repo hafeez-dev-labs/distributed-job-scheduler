@@ -12,7 +12,8 @@ public sealed record JobDefinition(
     string? CronExpression,
     JobPriority Priority,
     RetryPolicy RetryPolicy,
-    JobStatus Status = JobStatus.Draft);
+    JobStatus Status = JobStatus.Draft,
+    DateTimeOffset? NextExecutionAt = null);
 
 public sealed record JobExecution(
     Guid Id,
