@@ -18,7 +18,7 @@ public sealed class SqliteJobRepository : IJobRepository
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, CronExpression, Priority, MaxAttempts, InitialDelaySeconds, BackoffMultiplier, Status FROM Jobs WHERE Id = $id";
+        command.CommandText = "SELECT Id, Name, CronExpression, Priority, MaxAttempts, InitialDelaySeconds, BackoffMultiplier, Status, NextExecutionAt FROM Jobs WHERE Id = $id";
         command.Parameters.AddWithValue("$id", id.ToString());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadJob(reader) : null;
@@ -40,7 +40,7 @@ public sealed class SqliteJobRepository : IJobRepository
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "INSERT INTO Jobs (Id, Name, CronExpression, Priority, MaxAttempts, InitialDelaySeconds, BackoffMultiplier, Status) VALUES ($id, $name, $cron, $priority, $maxAttempts, $delay, $multiplier, $status)";
+            command.CommandText = "INSERT INTO Jobs (Id, Name, CronExpression, Priority, MaxAttempts, InitialDelaySeconds, BackoffMultiplier, Status, NextExecutionAt) VALUES ($id, $name, $cron, $priority, $maxAttempts, $delay, $multiplier, $status, $nextExecutionAt)";
             AddJobParameters(command, job);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -54,10 +54,37 @@ public sealed class SqliteJobRepository : IJobRepository
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE Jobs SET Name = $name, CronExpression = $cron, Priority = $priority, MaxAttempts = $maxAttempts, InitialDelaySeconds = $delay, BackoffMultiplier = $multiplier, Status = $status WHERE Id = $id";
+        command.CommandText = "UPDATE Jobs SET Name = $name, CronExpression = $cron, Priority = $priority, MaxAttempts = $maxAttempts, InitialDelaySeconds = $delay, BackoffMultiplier = $multiplier, Status = $status, NextExecutionAt = $nextExecutionAt WHERE Id = $id";
         command.Parameters.AddWithValue("$id", job.Id.ToString());
         AddJobParameters(command, job, false);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<JobDefinition>> GetDueJobsAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, Name, CronExpression, Priority, MaxAttempts, InitialDelaySeconds, BackoffMultiplier, Status, NextExecutionAt FROM Jobs WHERE Status = $status AND CronExpression IS NOT NULL AND (NextExecutionAt IS NULL OR NextExecutionAt <= $now) ORDER BY COALESCE(NextExecutionAt, $minimum)";
+        command.Parameters.AddWithValue("$status", (int)JobStatus.Active);
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        command.Parameters.AddWithValue("$minimum", DateTimeOffset.MinValue.ToString("O"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var jobs = new List<JobDefinition>();
+        while (await reader.ReadAsync(cancellationToken))
+            jobs.Add(ReadJob(reader));
+        return jobs;
+    }
+
+    public async Task<bool> TryAcquireSchedulerLeaseAsync(Guid jobId, string owner, DateTimeOffset now, TimeSpan duration, CancellationToken cancellationToken = default)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO SchedulerLeases (JobId, Owner, LeaseUntil) VALUES ($jobId, $owner, $leaseUntil) ON CONFLICT(JobId) DO UPDATE SET Owner = excluded.Owner, LeaseUntil = excluded.LeaseUntil WHERE SchedulerLeases.LeaseUntil <= $now OR SchedulerLeases.Owner = $owner; SELECT changes();";
+        command.Parameters.AddWithValue("$jobId", jobId.ToString());
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$leaseUntil", now.Add(duration).ToString("O"));
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
     }
 
     public async Task<JobExecution?> GetExecutionAsync(Guid id, CancellationToken cancellationToken = default)
@@ -122,7 +149,8 @@ public sealed class SqliteJobRepository : IJobRepository
                 MaxAttempts INTEGER NOT NULL,
                 InitialDelaySeconds INTEGER NOT NULL,
                 BackoffMultiplier REAL NOT NULL,
-                Status INTEGER NOT NULL
+                Status INTEGER NOT NULL,
+                NextExecutionAt TEXT NULL
             );
             CREATE TABLE IF NOT EXISTS JobExecutions (
                 Id TEXT PRIMARY KEY,
@@ -140,9 +168,29 @@ public sealed class SqliteJobRepository : IJobRepository
                 ResourceId TEXT NOT NULL,
                 PRIMARY KEY (Operation, IdempotencyKey)
             );
+            CREATE TABLE IF NOT EXISTS SchedulerLeases (
+                JobId TEXT PRIMARY KEY,
+                Owner TEXT NOT NULL,
+                LeaseUntil TEXT NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS IX_JobExecutions_JobId ON JobExecutions(JobId);
+            CREATE INDEX IF NOT EXISTS IX_Jobs_Scheduling ON Jobs(Status, NextExecutionAt);
             """;
         command.ExecuteNonQuery();
+        EnsureNextExecutionColumn(connection);
+    }
+
+    private static void EnsureNextExecutionColumn(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "ALTER TABLE Jobs ADD COLUMN NextExecutionAt TEXT NULL";
+        try
+        {
+            command.ExecuteNonQuery();
+        }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == 1 && exception.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+        {
+        }
     }
 
     private static async Task<string?> FindIdempotentResourceAsync(SqliteConnection connection, SqliteTransaction transaction, string operation, string key, CancellationToken cancellationToken)
@@ -177,6 +225,7 @@ public sealed class SqliteJobRepository : IJobRepository
         command.Parameters.AddWithValue("$delay", job.RetryPolicy.InitialDelaySeconds);
         command.Parameters.AddWithValue("$multiplier", job.RetryPolicy.BackoffMultiplier);
         command.Parameters.AddWithValue("$status", (int)job.Status);
+        command.Parameters.AddWithValue("$nextExecutionAt", (object?)job.NextExecutionAt?.ToString("O") ?? DBNull.Value);
     }
 
     private static JobDefinition ReadJob(SqliteDataReader reader) =>
@@ -186,7 +235,8 @@ public sealed class SqliteJobRepository : IJobRepository
             reader.IsDBNull(2) ? null : reader.GetString(2),
             (JobPriority)reader.GetInt32(3),
             new RetryPolicy(reader.GetInt32(4), reader.GetInt32(5), reader.GetDouble(6)),
-            (JobStatus)reader.GetInt32(7));
+            (JobStatus)reader.GetInt32(7),
+            reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)));
 
     private static JobExecution ReadExecution(SqliteDataReader reader) =>
         new(

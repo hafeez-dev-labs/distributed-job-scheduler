@@ -7,6 +7,8 @@ public interface IJobRepository
     Task<JobDefinition?> GetAsync(Guid id, CancellationToken cancellationToken = default);
     Task<JobDefinition> CreateAsync(JobDefinition job, string idempotencyKey, CancellationToken cancellationToken = default);
     Task SaveAsync(JobDefinition job, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<JobDefinition>> GetDueJobsAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
+    Task<bool> TryAcquireSchedulerLeaseAsync(Guid jobId, string owner, DateTimeOffset now, TimeSpan duration, CancellationToken cancellationToken = default);
     Task<JobExecution?> GetExecutionAsync(Guid id, CancellationToken cancellationToken = default);
     Task<JobExecution> CreateExecutionAsync(JobExecution execution, string idempotencyKey, CancellationToken cancellationToken = default);
 }
