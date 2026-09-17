@@ -27,3 +27,11 @@ public interface IJobExecutor
 {
     Task ExecuteAsync(JobExecution execution, CancellationToken cancellationToken = default);
 }
+
+public interface IJobQueue
+{
+    Task EnqueueAsync(JobExecution execution, JobPriority priority, DateTimeOffset availableAt, CancellationToken cancellationToken = default);
+    Task<QueueMessage?> TryDequeueAsync(string consumer, DateTimeOffset now, TimeSpan visibilityTimeout, CancellationToken cancellationToken = default);
+    Task<bool> AcknowledgeAsync(Guid messageId, string consumer, CancellationToken cancellationToken = default);
+    Task<bool> RequeueAsync(Guid messageId, string consumer, CancellationToken cancellationToken = default);
+}
