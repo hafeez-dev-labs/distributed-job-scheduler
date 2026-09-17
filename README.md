@@ -51,7 +51,7 @@ Content-Type: application/json
 }
 ```
 
-Phase 1 provides job creation, retrieval, lifecycle operations, immediate trigger requests, cron validation, idempotency, and SQLite persistence. See `docs/phase-1.md` for the API contract and boundaries.
+Phase 1 provides job creation, retrieval, lifecycle operations, immediate trigger requests, cron validation, idempotency, and SQLite persistence. Phase 2 adds cron evaluation and distributed scheduler leases. Phase 3 adds durable queueing, job priorities, visibility leases, acknowledgement, and explicit requeue semantics. See `docs/phase-1.md`, `docs/phase-2.md`, and `docs/phase-3.md` for the phase contracts and boundaries.
 
 ## Initial Project Structure
 

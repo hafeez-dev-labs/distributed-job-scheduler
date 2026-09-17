@@ -3,7 +3,7 @@ using DistributedJobScheduler.Domain;
 
 namespace DistributedJobScheduler.Application;
 
-public sealed class SchedulerService(IJobRepository repository)
+public sealed class SchedulerService(IJobRepository repository, IJobQueue? queue = null)
 {
     public async Task<int> EvaluateDueJobsAsync(DateTimeOffset now, string schedulerId, CancellationToken cancellationToken = default)
     {
@@ -16,7 +16,14 @@ public sealed class SchedulerService(IJobRepository repository)
             if (!await repository.TryAcquireSchedulerLeaseAsync(job.Id, schedulerId, now, TimeSpan.FromSeconds(30), cancellationToken))
                 continue;
 
+            var scheduledAt = job.NextExecutionAt ?? now;
             var nextExecutionAt = CalculateNextExecution(job.CronExpression, now);
+            var execution = new JobExecution(Guid.NewGuid(), job.Id, JobExecutionStatus.Pending);
+            var idempotencyKey = $"schedule:{job.Id}:{scheduledAt:O}";
+            var persistedExecution = await repository.CreateExecutionAsync(execution, idempotencyKey, cancellationToken);
+            if (queue is not null)
+                await queue.EnqueueAsync(persistedExecution, job.Priority, now, cancellationToken);
+
             await repository.SaveAsync(job with { NextExecutionAt = nextExecutionAt }, cancellationToken);
             scheduled++;
         }

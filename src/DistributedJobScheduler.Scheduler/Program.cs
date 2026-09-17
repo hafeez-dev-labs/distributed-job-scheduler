@@ -8,6 +8,7 @@ var databasePath = builder.Configuration["Scheduler:DatabasePath"] ?? "scheduler
 var connectionString = $"Data Source={databasePath}";
 
 builder.Services.AddSingleton<IJobRepository>(_ => new SqliteJobRepository(connectionString));
+builder.Services.AddSingleton<IJobQueue>(_ => new SqliteJobQueue(connectionString));
 builder.Services.AddSingleton<SchedulerService>();
 builder.Services.AddHostedService<DistributedJobScheduler.Scheduler.SchedulerWorker>();
 
