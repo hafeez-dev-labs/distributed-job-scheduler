@@ -11,6 +11,7 @@ public interface IJobRepository
     Task<bool> TryAcquireSchedulerLeaseAsync(Guid jobId, string owner, DateTimeOffset now, TimeSpan duration, CancellationToken cancellationToken = default);
     Task<JobExecution?> GetExecutionAsync(Guid id, CancellationToken cancellationToken = default);
     Task<JobExecution> CreateExecutionAsync(JobExecution execution, string idempotencyKey, CancellationToken cancellationToken = default);
+    Task UpdateExecutionAsync(JobExecution execution, CancellationToken cancellationToken = default);
 }
 
 public interface IJobScheduler

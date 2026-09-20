@@ -97,6 +97,20 @@ public sealed class SqliteJobRepository : IJobRepository
         return await reader.ReadAsync(cancellationToken) ? ReadExecution(reader) : null;
     }
 
+    public async Task UpdateExecutionAsync(JobExecution execution, CancellationToken cancellationToken = default)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE JobExecutions SET Status = $status, Attempt = $attempt, StartedAt = $startedAt, CompletedAt = $completedAt, FailureReason = $failureReason WHERE Id = $id";
+        command.Parameters.AddWithValue("$id", execution.Id.ToString());
+        command.Parameters.AddWithValue("$status", (int)execution.Status);
+        command.Parameters.AddWithValue("$attempt", execution.Attempt);
+        command.Parameters.AddWithValue("$startedAt", (object?)execution.StartedAt?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$completedAt", (object?)execution.CompletedAt?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$failureReason", (object?)execution.FailureReason ?? DBNull.Value);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) throw new InvalidOperationException($"Execution '{execution.Id}' was not found.");
+    }
+
     public async Task<JobExecution> CreateExecutionAsync(JobExecution execution, string idempotencyKey, CancellationToken cancellationToken = default)
     {
         await using var connection = OpenConnection();
