@@ -14,20 +14,9 @@ public interface IJobRepository
     Task UpdateExecutionAsync(JobExecution execution, CancellationToken cancellationToken = default);
 }
 
-public interface IJobScheduler
-{
-    Task ScheduleAsync(JobDefinition job, CancellationToken cancellationToken = default);
-}
-
-public interface IJobDispatcher
-{
-    Task DispatchAsync(JobExecution execution, CancellationToken cancellationToken = default);
-}
-
-public interface IJobExecutor
-{
-    Task ExecuteAsync(JobExecution execution, CancellationToken cancellationToken = default);
-}
+public interface IJobScheduler { Task ScheduleAsync(JobDefinition job, CancellationToken cancellationToken = default); }
+public interface IJobDispatcher { Task DispatchAsync(JobExecution execution, CancellationToken cancellationToken = default); }
+public interface IJobExecutor { Task ExecuteAsync(JobExecution execution, CancellationToken cancellationToken = default); }
 
 public interface IJobQueue
 {
@@ -35,4 +24,7 @@ public interface IJobQueue
     Task<QueueMessage?> TryDequeueAsync(string consumer, DateTimeOffset now, TimeSpan visibilityTimeout, CancellationToken cancellationToken = default);
     Task<bool> AcknowledgeAsync(Guid messageId, string consumer, CancellationToken cancellationToken = default);
     Task<bool> RequeueAsync(Guid messageId, string consumer, CancellationToken cancellationToken = default);
+    Task<bool> RequeueAsync(Guid messageId, string consumer, DateTimeOffset availableAt, CancellationToken cancellationToken = default);
+    Task<bool> DeadLetterAsync(Guid messageId, string consumer, JobExecution execution, string reason, CancellationToken cancellationToken = default);
+    Task<int> ReplayDeadLettersAsync(CancellationToken cancellationToken = default);
 }
