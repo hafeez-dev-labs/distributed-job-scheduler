@@ -22,4 +22,6 @@ public sealed record JobExecution(
     int Attempt = 0,
     DateTimeOffset? StartedAt = null,
     DateTimeOffset? CompletedAt = null,
-    string? FailureReason = null);
+    string? FailureReason = null,
+    string? LeaseOwner = null,
+    DateTimeOffset? LeaseUntil = null);

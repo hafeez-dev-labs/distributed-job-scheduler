@@ -87,14 +87,98 @@ public sealed class SqliteJobRepository : IJobRepository
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
     }
 
+    public async Task<bool> RenewSchedulerLeaseAsync(Guid jobId, string owner, DateTimeOffset now, TimeSpan duration, CancellationToken cancellationToken = default)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE SchedulerLeases SET LeaseUntil = $leaseUntil WHERE JobId = $jobId AND Owner = $owner AND LeaseUntil > $now";
+        command.Parameters.AddWithValue("$jobId", jobId.ToString());
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$leaseUntil", now.Add(duration).ToString("O"));
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
     public async Task<JobExecution?> GetExecutionAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await using var connection = OpenConnection();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, JobId, Status, Attempt, StartedAt, CompletedAt, FailureReason FROM JobExecutions WHERE Id = $id";
+        command.CommandText = "SELECT Id, JobId, Status, Attempt, StartedAt, CompletedAt, FailureReason, LeaseOwner, LeaseUntil FROM JobExecutions WHERE Id = $id";
         command.Parameters.AddWithValue("$id", id.ToString());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadExecution(reader) : null;
+    }
+
+    public async Task<bool> TryAcquireExecutionLeaseAsync(Guid executionId, string owner, DateTimeOffset now, TimeSpan duration, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            throw new ArgumentException("Execution lease owner is required.", nameof(owner));
+
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE JobExecutions
+            SET LeaseOwner = $owner, LeaseUntil = $leaseUntil
+            WHERE Id = $id
+              AND Status NOT IN ($succeeded, $cancelled)
+              AND (LeaseUntil IS NULL OR LeaseUntil <= $now OR LeaseOwner = $owner);
+            SELECT changes();
+            """;
+        command.Parameters.AddWithValue("$id", executionId.ToString());
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$leaseUntil", now.Add(duration).ToString("O"));
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        command.Parameters.AddWithValue("$succeeded", (int)JobExecutionStatus.Succeeded);
+        command.Parameters.AddWithValue("$cancelled", (int)JobExecutionStatus.Cancelled);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1;
+    }
+
+    public async Task<bool> RenewExecutionLeaseAsync(Guid executionId, string owner, DateTimeOffset now, TimeSpan duration, CancellationToken cancellationToken = default)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE JobExecutions SET LeaseUntil = $leaseUntil WHERE Id = $id AND LeaseOwner = $owner AND LeaseUntil > $now";
+        command.Parameters.AddWithValue("$id", executionId.ToString());
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$leaseUntil", now.Add(duration).ToString("O"));
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
+    public async Task<bool> TryUpdateExecutionAsync(JobExecution execution, string owner, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE JobExecutions
+            SET Status = $status,
+                Attempt = $attempt,
+                StartedAt = $startedAt,
+                CompletedAt = $completedAt,
+                FailureReason = $failureReason
+            WHERE Id = $id
+              AND LeaseOwner = $owner
+              AND LeaseUntil > $now
+            """;
+        command.Parameters.AddWithValue("$id", execution.Id.ToString());
+        command.Parameters.AddWithValue("$owner", owner);
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        command.Parameters.AddWithValue("$status", (int)execution.Status);
+        command.Parameters.AddWithValue("$attempt", execution.Attempt);
+        command.Parameters.AddWithValue("$startedAt", (object?)execution.StartedAt?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$completedAt", (object?)execution.CompletedAt?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$failureReason", (object?)execution.FailureReason ?? DBNull.Value);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
+    public async Task<bool> ReleaseExecutionLeaseAsync(Guid executionId, string owner, CancellationToken cancellationToken = default)
+    {
+        await using var connection = OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE JobExecutions SET LeaseOwner = NULL, LeaseUntil = NULL WHERE Id = $id AND LeaseOwner = $owner";
+        command.Parameters.AddWithValue("$id", executionId.ToString());
+        command.Parameters.AddWithValue("$owner", owner);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
     public async Task UpdateExecutionAsync(JobExecution execution, CancellationToken cancellationToken = default)
@@ -127,7 +211,7 @@ public sealed class SqliteJobRepository : IJobRepository
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "INSERT INTO JobExecutions (Id, JobId, Status, Attempt, StartedAt, CompletedAt, FailureReason) VALUES ($id, $jobId, $status, $attempt, $startedAt, $completedAt, $failureReason)";
+            command.CommandText = "INSERT INTO JobExecutions (Id, JobId, Status, Attempt, StartedAt, CompletedAt, FailureReason, LeaseOwner, LeaseUntil) VALUES ($id, $jobId, $status, $attempt, $startedAt, $completedAt, $failureReason, NULL, NULL)";
             command.Parameters.AddWithValue("$id", execution.Id.ToString());
             command.Parameters.AddWithValue("$jobId", execution.JobId.ToString());
             command.Parameters.AddWithValue("$status", (int)execution.Status);
@@ -174,6 +258,8 @@ public sealed class SqliteJobRepository : IJobRepository
                 StartedAt TEXT NULL,
                 CompletedAt TEXT NULL,
                 FailureReason TEXT NULL,
+                LeaseOwner TEXT NULL,
+                LeaseUntil TEXT NULL,
                 FOREIGN KEY (JobId) REFERENCES Jobs(Id)
             );
             CREATE TABLE IF NOT EXISTS IdempotencyKeys (
@@ -188,10 +274,12 @@ public sealed class SqliteJobRepository : IJobRepository
                 LeaseUntil TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_JobExecutions_JobId ON JobExecutions(JobId);
+            CREATE INDEX IF NOT EXISTS IX_JobExecutions_Lease ON JobExecutions(LeaseUntil, LeaseOwner);
             CREATE INDEX IF NOT EXISTS IX_Jobs_Scheduling ON Jobs(Status, NextExecutionAt);
             """;
         command.ExecuteNonQuery();
         EnsureNextExecutionColumn(connection);
+        EnsureExecutionLeaseColumns(connection);
     }
 
     private static void EnsureNextExecutionColumn(SqliteConnection connection)
@@ -204,6 +292,26 @@ public sealed class SqliteJobRepository : IJobRepository
         }
         catch (SqliteException exception) when (exception.SqliteErrorCode == 1 && exception.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
         {
+        }
+    }
+
+    private static void EnsureExecutionLeaseColumns(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        foreach (var statement in new[]
+        {
+            "ALTER TABLE JobExecutions ADD COLUMN LeaseOwner TEXT NULL",
+            "ALTER TABLE JobExecutions ADD COLUMN LeaseUntil TEXT NULL"
+        })
+        {
+            command.CommandText = statement;
+            try
+            {
+                command.ExecuteNonQuery();
+            }
+            catch (SqliteException exception) when (exception.SqliteErrorCode == 1 && exception.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+            {
+            }
         }
     }
 
@@ -260,5 +368,7 @@ public sealed class SqliteJobRepository : IJobRepository
             reader.GetInt32(3),
             reader.IsDBNull(4) ? null : DateTimeOffset.Parse(reader.GetString(4)),
             reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5)),
-            reader.IsDBNull(6) ? null : reader.GetString(6));
+            reader.IsDBNull(6) ? null : reader.GetString(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)));
 }
