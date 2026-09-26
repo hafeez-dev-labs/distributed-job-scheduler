@@ -72,9 +72,55 @@ public sealed class WorkerService(IJobRepository repository, IJobQueue queue, Wo
                 return;
             }
 
+            if (job.Status == JobStatus.Cancelled)
+            {
+                var cancelled = execution with
+                {
+                    Status = JobExecutionStatus.Cancelled,
+                    CompletedAt = DateTimeOffset.UtcNow,
+                    FailureReason = "Job was cancelled before execution."
+                };
+                await repository.UpdateExecutionAsync(cancelled, cancellationToken);
+                await queue.AcknowledgeAsync(message.Id, workerId, cancellationToken);
+                return;
+            }
+
+            if (job.Status != JobStatus.Active)
+            {
+                await queue.RequeueAsync(message.Id, workerId, DateTimeOffset.UtcNow.AddSeconds(1), cancellationToken);
+                return;
+            }
+
+            if (!await repository.AreDependenciesSatisfiedAsync(job.Id, cancellationToken))
+            {
+                if (await repository.HasFailedDependencyAsync(job.Id, cancellationToken))
+                {
+                    var blocked = execution with
+                    {
+                        Status = JobExecutionStatus.Failed,
+                        CompletedAt = DateTimeOffset.UtcNow,
+                        FailureReason = "A required dependency failed without a successful completion."
+                    };
+                    await repository.UpdateExecutionAsync(blocked, cancellationToken);
+                    await queue.AcknowledgeAsync(message.Id, workerId, cancellationToken);
+                    return;
+                }
+
+                await queue.RequeueAsync(message.Id, workerId, DateTimeOffset.UtcNow.AddSeconds(1), cancellationToken);
+                return;
+            }
+
             var now = DateTimeOffset.UtcNow;
             var executionLease = TimeSpan.FromSeconds(GetPositiveInt("WORKER_EXECUTION_LEASE_SECONDS", 30));
-            if (!await repository.TryAcquireExecutionLeaseAsync(message.ExecutionId, workerId, now, executionLease, cancellationToken))
+            if (!await repository.TryAcquireExecutionLeaseAsync(
+                    message.ExecutionId,
+                    workerId,
+                    now,
+                    executionLease,
+                    job.MaxConcurrentExecutions,
+                    job.TenantId,
+                    job.ConcurrencyGroup,
+                    cancellationToken))
             {
                 await queue.RequeueAsync(message.Id, workerId, DateTimeOffset.UtcNow.AddSeconds(1), cancellationToken);
                 return;
@@ -97,6 +143,13 @@ public sealed class WorkerService(IJobRepository repository, IJobQueue queue, Wo
                 await repository.ReleaseExecutionLeaseAsync(message.ExecutionId, workerId, cancellationToken);
                 return;
             }
+
+            logger.LogInformation(
+                "Worker {WorkerId} executing job {JobId}, execution {ExecutionId}, attempt {Attempt}.",
+                workerId,
+                running.JobId,
+                running.Id,
+                running.Attempt);
 
             using var executionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var leaseLost = false;

@@ -13,7 +13,10 @@ public sealed record JobDefinition(
     JobPriority Priority,
     RetryPolicy RetryPolicy,
     JobStatus Status = JobStatus.Draft,
-    DateTimeOffset? NextExecutionAt = null);
+    DateTimeOffset? NextExecutionAt = null,
+    string? TenantId = null,
+    string? ConcurrencyGroup = null,
+    int? MaxConcurrentExecutions = null);
 
 public sealed record JobExecution(
     Guid Id,
@@ -25,3 +28,5 @@ public sealed record JobExecution(
     string? FailureReason = null,
     string? LeaseOwner = null,
     DateTimeOffset? LeaseUntil = null);
+
+public sealed record JobDependency(Guid JobId, Guid DependsOnJobId);

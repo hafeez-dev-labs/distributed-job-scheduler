@@ -14,6 +14,14 @@ public sealed class JobManagementService(IJobRepository repository) : IJobManage
             throw new ArgumentException("Job name is required.");
         if (request.Retries < 0)
             throw new ArgumentException("Retries cannot be negative.");
+        if (request.MaxConcurrentExecutions is <= 0)
+            throw new ArgumentException("Max concurrent executions must be greater than zero.");
+
+        var tenantId = request.TenantId?.Trim();
+        var concurrencyGroup = request.ConcurrencyGroup?.Trim();
+        if (!string.IsNullOrWhiteSpace(concurrencyGroup) && string.IsNullOrWhiteSpace(tenantId))
+            throw new ArgumentException("A concurrency group requires a tenant.");
+
         if (!string.IsNullOrWhiteSpace(request.Schedule))
         {
             try
@@ -32,13 +40,23 @@ public sealed class JobManagementService(IJobRepository repository) : IJobManage
             string.IsNullOrWhiteSpace(request.Schedule) ? null : request.Schedule.Trim(),
             JobPriority.Normal,
             new RetryPolicy(request.Retries),
-            JobStatus.Active);
+            JobStatus.Active,
+            null,
+            string.IsNullOrWhiteSpace(tenantId) ? null : tenantId,
+            string.IsNullOrWhiteSpace(concurrencyGroup) ? null : concurrencyGroup,
+            request.MaxConcurrentExecutions);
 
         return await repository.CreateAsync(job, idempotencyKey.Trim(), cancellationToken);
     }
 
     public Task<JobDefinition?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         repository.GetAsync(id, cancellationToken);
+
+    public Task<IReadOnlyList<JobDependency>> GetDependenciesAsync(Guid id, CancellationToken cancellationToken = default) =>
+        repository.GetDependenciesAsync(id, cancellationToken);
+
+    public Task AddDependencyAsync(Guid id, Guid dependsOnJobId, CancellationToken cancellationToken = default) =>
+        repository.AddDependencyAsync(id, dependsOnJobId, cancellationToken);
 
     public async Task<JobDefinition?> PauseAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -110,6 +128,8 @@ public interface IJobManagementService
 {
     Task<JobDefinition> CreateAsync(CreateJobRequest request, string idempotencyKey, CancellationToken cancellationToken = default);
     Task<JobDefinition?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<JobDependency>> GetDependenciesAsync(Guid id, CancellationToken cancellationToken = default);
+    Task AddDependencyAsync(Guid id, Guid dependsOnJobId, CancellationToken cancellationToken = default);
     Task<JobDefinition?> PauseAsync(Guid id, CancellationToken cancellationToken = default);
     Task<JobDefinition?> ResumeAsync(Guid id, CancellationToken cancellationToken = default);
     Task<JobDefinition?> CancelAsync(Guid id, CancellationToken cancellationToken = default);

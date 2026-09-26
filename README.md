@@ -81,25 +81,22 @@ README.md
 DistributedJobScheduler.sln
 ```
 
+## Phase 7 — Dependencies & Advanced Scheduling ✅
+
+- [x] Job dependency relationships with API endpoints
+- [x] Self-dependency and transitive-cycle rejection
+- [x] Dependency-aware execution blocking and failure propagation
+- [x] Per-job, tenant-wide, and tenant/group concurrency limits
+- [x] Atomic concurrency enforcement at the execution-lease boundary
+- [x] Pause/cancel lifecycle handling before work starts
+- [x] Retry/requeue behavior respects dependency and concurrency rules
+- [x] Regression coverage for dependency and advanced-scheduling behavior
+- [x] Phase 7 execution semantics documented in docs/phase-7.md
+
 ## Planned Capabilities
 
-- Cron and one-off job scheduling
-- Job priorities
-- Retries with exponential backoff
-- Dead-letter queues and replay
-- Distributed locking and leases
-- Worker heartbeats and crash recovery
-- Job dependencies
-- Concurrency limits
-- Idempotent execution
-- Execution history
-- Metrics, tracing, and structured logging
+- Authentication and authorization
 - Operational dashboard
-
-## Engineering Goals
-
-The project is intended to demonstrate production-grade distributed-systems design rather than only CRUD functionality. Scheduling, dispatch, and execution are separated so that each concern can scale independently and failure scenarios can be reasoned about explicitly.
-
-Key guarantees and design goals include horizontal scalability, explicit job and execution state transitions, at-least-once delivery with duplicate-execution protection, crash recovery, and observable end-to-end execution state.
-
-See the repository EPIC for the phased implementation plan.
+- Metrics, tracing, and structured logging
+- Production broker integration
+- Production deployment and load testing

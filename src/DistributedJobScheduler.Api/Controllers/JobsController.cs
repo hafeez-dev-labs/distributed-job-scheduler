@@ -30,6 +30,33 @@ public sealed class JobsController(IJobManagementService service) : ControllerBa
         return job is null ? NotFound() : Ok(ToResponse(job));
     }
 
+    [HttpGet("{id:guid}/dependencies")]
+    public async Task<ActionResult<IReadOnlyList<JobDependencyResponse>>> GetDependencies(Guid id, CancellationToken cancellationToken)
+    {
+        var job = await service.GetAsync(id, cancellationToken);
+        if (job is null)
+            return NotFound();
+
+        var dependencies = await service.GetDependenciesAsync(id, cancellationToken);
+        return Ok(dependencies.Select(dependency => new JobDependencyResponse(dependency.JobId, dependency.DependsOnJobId)).ToArray());
+    }
+
+    [HttpPost("{id:guid}/dependencies")]
+    public async Task<ActionResult<JobDependencyResponse>> AddDependency(Guid id, AddJobDependencyRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await service.AddDependencyAsync(id, request.DependsOnJobId, cancellationToken);
+            return Created(
+                $"/jobs/{id}/dependencies/{request.DependsOnJobId}",
+                new JobDependencyResponse(id, request.DependsOnJobId));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(exception.Message);
+        }
+    }
+
     [HttpPost("{id:guid}/pause")]
     public Task<ActionResult<JobResponse>> Pause(Guid id, CancellationToken cancellationToken) =>
         ChangeState(() => service.PauseAsync(id, cancellationToken));
@@ -83,7 +110,7 @@ public sealed class JobsController(IJobManagementService service) : ControllerBa
     private string GetIdempotencyKey() => Request.Headers["Idempotency-Key"].ToString();
 
     private static JobResponse ToResponse(JobDefinition job) =>
-        new(job.Id, job.Name, job.CronExpression, job.Status.ToString());
+        new(job.Id, job.Name, job.CronExpression, job.Status.ToString(), job.TenantId, job.ConcurrencyGroup, job.MaxConcurrentExecutions);
 
     private static ExecutionResponse ToResponse(JobExecution execution) =>
         new(execution.Id, execution.JobId, execution.Status.ToString(), execution.Attempt, execution.StartedAt, execution.CompletedAt, execution.FailureReason);
