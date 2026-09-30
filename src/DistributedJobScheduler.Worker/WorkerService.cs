@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DistributedJobScheduler.Application;
 using DistributedJobScheduler.Domain;
 
@@ -36,6 +37,10 @@ public sealed class WorkerService(IJobRepository repository, IJobQueue queue, Wo
 
     private async Task ExecuteAsync(QueueMessage message, string workerId, SemaphoreSlim semaphore, CancellationToken cancellationToken)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+        using var activity = JobSchedulerTelemetry.StartActivity("worker.execute");
+        activity?.SetTag("worker.id", workerId);
+        activity?.SetTag("execution.id", message.ExecutionId);
         try
         {
             var execution = await repository.GetExecutionAsync(message.ExecutionId, cancellationToken);
@@ -182,6 +187,7 @@ public sealed class WorkerService(IJobRepository repository, IJobQueue queue, Wo
                     Status = JobExecutionStatus.Succeeded,
                     CompletedAt = DateTimeOffset.UtcNow
                 };
+                JobSchedulerTelemetry.ExecutionDuration.Record(Stopwatch.GetElapsedTime(startedAt).TotalSeconds);
 
                 if (!await repository.TryUpdateExecutionAsync(completed, workerId, DateTimeOffset.UtcNow, cancellationToken))
                 {
@@ -250,6 +256,7 @@ public sealed class WorkerService(IJobRepository repository, IJobQueue queue, Wo
             return;
         }
 
+        JobSchedulerTelemetry.ExecutionFailures.Add(1);
         if (ReliabilityPolicy.ShouldDeadLetter(failed.Attempt, job.RetryPolicy))
         {
             var deadLettered = failed with { Status = JobExecutionStatus.DeadLettered };
@@ -257,12 +264,14 @@ public sealed class WorkerService(IJobRepository repository, IJobQueue queue, Wo
             {
                 await queue.DeadLetterAsync(message.Id, workerId, deadLettered, exception.Message, cancellationToken);
                 await repository.ReleaseExecutionLeaseAsync(message.ExecutionId, workerId, cancellationToken);
+                JobSchedulerTelemetry.DeadLetteredExecutions.Add(1);
                 logger.LogWarning("Execution {ExecutionId} moved to DLQ after {Attempt} attempts.", failed.Id, failed.Attempt);
             }
             return;
         }
 
         var delay = ReliabilityPolicy.GetBackoff(failed.Attempt, job.RetryPolicy);
+        JobSchedulerTelemetry.ExecutionRetries.Add(1);
         await queue.RequeueAsync(message.Id, workerId, DateTimeOffset.UtcNow.Add(delay), cancellationToken);
         await repository.ReleaseExecutionLeaseAsync(message.ExecutionId, workerId, cancellationToken);
         logger.LogWarning("Execution {ExecutionId} failed on attempt {Attempt}; retrying after {Delay}.", failed.Id, failed.Attempt, delay);

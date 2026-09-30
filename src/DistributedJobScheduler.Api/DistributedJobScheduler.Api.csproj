@@ -8,5 +8,8 @@
     <ProjectReference Include="..\DistributedJobScheduler.Application\DistributedJobScheduler.Application.csproj" />
     <ProjectReference Include="..\DistributedJobScheduler.Contracts\DistributedJobScheduler.Contracts.csproj" />
     <ProjectReference Include="..\DistributedJobScheduler.Infrastructure\DistributedJobScheduler.Infrastructure.csproj" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.19.1" />
   </ItemGroup>
 </Project>
