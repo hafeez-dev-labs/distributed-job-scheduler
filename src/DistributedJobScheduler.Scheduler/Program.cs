@@ -7,6 +7,8 @@ var builder = Host.CreateApplicationBuilder(args);
 var databasePath = builder.Configuration["Scheduler:DatabasePath"] ?? "scheduler.db";
 var connectionString = $"Data Source={databasePath}";
 
+builder.Services.AddOpenTelemetry().ConfigureResource(r => r.AddService(JobSchedulerTelemetry.ServiceName + ".scheduler")).WithTracing(t => t.AddSource(JobSchedulerTelemetry.ActivitySourceName)).WithMetrics(m => m.AddMeter(JobSchedulerTelemetry.MeterName)).UseOtlpExporter();
+
 builder.Services.AddSingleton<IJobRepository>(_ => new SqliteJobRepository(connectionString));
 builder.Services.AddSingleton<IJobQueue>(_ => new SqliteJobQueue(connectionString));
 builder.Services.AddSingleton<SchedulerService>();
