@@ -15,6 +15,7 @@ builder.Services.AddOpenTelemetry()
     .UseOtlpExporter();
 builder.Services.AddSingleton<IJobRepository>(_ => new SqliteJobRepository(builder.Configuration.GetConnectionString("Scheduler") ?? "Data Source=distributed-job-scheduler.db"));
 builder.Services.AddScoped<IJobManagementService, JobManagementService>();
+builder.Services.AddSingleton<DashboardService>(_ => new DashboardService(builder.Configuration.GetConnectionString("Scheduler") ?? "Data Source=distributed-job-scheduler.db"));
 var app = builder.Build();
 app.Use(async (context, next) =>
 {
@@ -28,5 +29,8 @@ app.Use(async (context, next) =>
 });
 app.MapControllers();
 app.MapHealthChecks("/health");
+app.MapGet("/dashboard", () => Results.Content(DashboardPage.Html, "text/html"));
+app.MapGet("/dashboard/data", async (DashboardService dashboardService, string? search, string? status, CancellationToken cancellationToken) =>
+    Results.Ok(await dashboardService.GetSnapshotAsync(search, status, cancellationToken)));
 app.Run();
 public partial class Program;

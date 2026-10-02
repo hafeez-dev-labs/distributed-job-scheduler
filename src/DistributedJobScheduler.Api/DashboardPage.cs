@@ -1,0 +1,20 @@
+public static class DashboardPage
+{
+    public const string Html = """
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Distributed Job Scheduler — Dashboard</title>
+<style>body{font-family:system-ui,sans-serif;margin:0;background:#f6f7f9;color:#20242a}header{background:#20242a;color:white;padding:24px 32px}main{max-width:1200px;margin:24px auto;padding:0 20px}.card{background:white;border:1px solid #ddd;border-radius:10px;padding:18px;box-shadow:0 1px 3px #0001;margin-bottom:18px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px solid #eee;text-align:left;font-size:14px}th{background:#fafafa}.controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}input,select,button{padding:9px;border:1px solid #bbb;border-radius:6px;background:white}button{cursor:pointer}.status{font-weight:600}.muted{color:#666;font-size:13px}.error{color:#a11}</style></head>
+<body><header><h1>Distributed Job Scheduler</h1><div>Operational dashboard</div></header><main>
+<div class="controls"><input id="search" placeholder="Search jobs, executions, failures"><select id="status"><option value="">All statuses</option><option>Active</option><option>Paused</option><option>Cancelled</option><option>Pending</option><option>Running</option><option>Succeeded</option><option>Failed</option><option>DeadLettered</option></select><button onclick="load()">Refresh</button></div>
+<div id="worker" class="card"></div><section><h2>Jobs & schedules</h2><div class="card"><table><thead><tr><th>Name</th><th>Status</th><th>Schedule</th><th>Next run</th><th>Scope</th><th>Actions</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
+<section><h2>Recent executions</h2><div class="card"><table><thead><tr><th>Job</th><th>Status</th><th>Attempt</th><th>Started</th><th>Completed</th><th>Failure</th></tr></thead><tbody id="executions"></tbody></table></div></section></main>
+<script>
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const fmt=v=>v?new Date(v).toLocaleString():'—';
+async function action(id,path){const r=await fetch('/jobs/'+id+path,{method:'POST',headers:{'Idempotency-Key':'dashboard-'+crypto.randomUUID()}});if(!r.ok)alert(await r.text());await load();}
+async function load(){const q=new URLSearchParams(),s=document.getElementById('search').value.trim(),st=document.getElementById('status').value;if(s)q.set('search',s);if(st)q.set('status',st);try{const data=await fetch('/dashboard/data?'+q).then(r=>r.json());
+document.getElementById('worker').innerHTML='<strong>Worker status:</strong> '+esc(data.workerStatus.status)+'<div class="muted">'+esc(data.workerStatus.message)+'</div>';
+document.getElementById('jobs').innerHTML=data.jobs.map(j=>'<tr><td>'+esc(j.name)+'</td><td class="status">'+esc(j.status)+'</td><td>'+esc(j.schedule||'one-shot')+'</td><td>'+fmt(j.nextExecutionAt)+'</td><td>'+esc([j.tenantId,j.concurrencyGroup].filter(Boolean).join(' / ')||'default')+'</td><td>'+(j.status==='Active'?'<button onclick="action(\''+j.id+'\',\'/pause\')">Pause</button> ':'')+(j.status==='Paused'?'<button onclick="action(\''+j.id+'\',\'/resume\')">Resume</button> ':'')+(j.status!=='Cancelled'?'<button onclick="action(\''+j.id+'\',\'/cancel\')">Cancel</button> ':'')+'<button onclick="action(\''+j.id+'\',\'/trigger\')">Trigger</button></td></tr>').join('')||'<tr><td colspan="6">No jobs found.</td></tr>';
+document.getElementById('executions').innerHTML=data.recentExecutions.map(e=>'<tr><td>'+esc(e.jobName)+'</td><td class="status">'+esc(e.status)+'</td><td>'+e.attempt+'</td><td>'+fmt(e.startedAt)+'</td><td>'+fmt(e.completedAt)+'</td><td class="error">'+esc(e.failureReason||'')+'</td></tr>').join('')||'<tr><td colspan="6">No executions found.</td></tr>';}catch(e){document.getElementById('worker').innerHTML='<span class="error">Unable to load dashboard data.</span>';}}
+load();
+</script></body></html>
+""";
+}
