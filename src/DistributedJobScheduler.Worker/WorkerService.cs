@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using DistributedJobScheduler.Application;
 using DistributedJobScheduler.Domain;
@@ -10,7 +11,11 @@ public sealed class WorkerService(IJobRepository repository, IJobQueue queue, Wo
     {
         var workerId = registry.Register();
         var concurrency = GetPositiveInt("WORKER_CONCURRENCY", 4);
+        var drainTimeout = TimeSpan.FromSeconds(GetPositiveInt("WORKER_SHUTDOWN_DRAIN_SECONDS", 20));
         using var semaphore = new SemaphoreSlim(concurrency, concurrency);
+        using var executionCancellation = new CancellationTokenSource();
+        var activeTasks = new ConcurrentDictionary<long, Task>();
+        long taskSequence = 0;
         var heartbeat = HeartbeatAsync(workerId, cancellationToken);
 
         try
@@ -26,12 +31,60 @@ public sealed class WorkerService(IJobRepository repository, IJobQueue queue, Wo
                     continue;
                 }
 
-                _ = ExecuteAsync(message, workerId, semaphore, cancellationToken);
+                var taskId = Interlocked.Increment(ref taskSequence);
+                var task = ExecuteTrackedAsync(message, workerId, semaphore, executionCancellation.Token);
+                activeTasks[taskId] = task;
+                _ = task.ContinueWith(
+                    completed => activeTasks.TryRemove(taskId, out var removed),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
         }
         finally
         {
-            await heartbeat;
+            try
+            {
+                await heartbeat;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+
+            var draining = Task.WhenAll(activeTasks.Values.ToArray());
+            try
+            {
+                await draining.WaitAsync(drainTimeout);
+            }
+            catch (TimeoutException)
+            {
+                logger.LogWarning("Worker {WorkerId} exceeded the {DrainTimeout} shutdown drain window; cancelling in-flight executions.", workerId, drainTimeout);
+                executionCancellation.Cancel();
+                await draining;
+            }
+        }
+    }
+
+    private async Task ExecuteTrackedAsync(QueueMessage message, string workerId, SemaphoreSlim semaphore, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ExecuteAsync(message, workerId, semaphore, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Worker {WorkerId} failed while processing queue message {MessageId}.", workerId, message.Id);
+            try
+            {
+                await queue.RequeueAsync(message.Id, workerId, DateTimeOffset.UtcNow, CancellationToken.None);
+            }
+            catch (Exception requeueException)
+            {
+                logger.LogError(requeueException, "Worker {WorkerId} could not requeue message {MessageId}.", workerId, message.Id);
+            }
         }
     }
 
