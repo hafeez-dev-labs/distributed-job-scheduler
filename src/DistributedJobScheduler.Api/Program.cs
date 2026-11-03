@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Threading.RateLimiting;
 using DistributedJobScheduler.Application;
 using DistributedJobScheduler.Infrastructure;
 using OpenTelemetry.Metrics;
@@ -8,6 +10,32 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddHealthChecks();
+
+var permitLimit = builder.Configuration.GetValue("RateLimiting:PermitLimit", 60);
+var windowSeconds = builder.Configuration.GetValue("RateLimiting:WindowSeconds", 60);
+if (permitLimit < 1 || windowSeconds < 1)
+    throw new InvalidOperationException("Rate limit settings must be positive.");
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = permitLimit,
+                Window = TimeSpan.FromSeconds(windowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+    options.OnRejected = (context, _) =>
+    {
+        context.HttpContext.Response.Headers.RetryAfter = windowSeconds.ToString(CultureInfo.InvariantCulture);
+        return ValueTask.CompletedTask;
+    };
+});
+
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource => resource.AddService(JobSchedulerTelemetry.ServiceName + ".api"))
     .WithTracing(tracing => tracing.AddSource(JobSchedulerTelemetry.ActivitySourceName).AddAspNetCoreInstrumentation(options => options.RecordException = true))
@@ -27,6 +55,7 @@ app.Use(async (context, next) =>
         .BeginScope(new Dictionary<string, object?> { ["CorrelationId"] = correlationId });
     await next();
 });
+app.UseRateLimiter();
 app.MapControllers();
 app.MapHealthChecks("/health");
 app.MapGet("/dashboard", () => Results.Content(DashboardPage.Html, "text/html"));
